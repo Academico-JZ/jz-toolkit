@@ -20,8 +20,25 @@ $Config = @{
     VaultGUID = "{2559a1f2-21d7-11d4-bdaf-00c04f60b9f0}"
     DriveUtil = "S:"
     DriveSRE  = "T:"
-    PathUtils = "$PSScriptRoot\Utilitarios"
-    PathSRE   = "$PSScriptRoot\SysAdmin_Toolkit"
+}
+
+# Auto-detecção de caminhos robusta
+$DataFolderName = "JZ_Data.$($Config.VaultGUID)"
+if ($PSScriptRoot -match [regex]::Escape($DataFolderName)) {
+    # Se ja estiver dentro da pasta GUID
+    $Config.PathUtils = Join-Path $PSScriptRoot "Utilitarios"
+    $Config.PathSRE   = Join-Path $PSScriptRoot "SysAdmin_Toolkit"
+} else {
+    # Se estiver na raiz do ZIP (GitHub)
+    $PotentialDataPath = Join-Path $PSScriptRoot $DataFolderName
+    if (Test-Path $PotentialDataPath) {
+        $Config.PathUtils = Join-Path $PotentialDataPath "Utilitarios"
+        $Config.PathSRE   = Join-Path $PotentialDataPath "SysAdmin_Toolkit"
+    } else {
+        # Fallback para pastas no mesmo nivel
+        $Config.PathUtils = Join-Path $PSScriptRoot "Utilitarios"
+        $Config.PathSRE   = Join-Path $PSScriptRoot "SysAdmin_Toolkit"
+    }
 }
 
 # --- Helper Functions ---
@@ -36,6 +53,8 @@ function Set-VaultState {
     
     foreach ($Folder in $Folders) {
         $NormalPath = Join-Path $PSScriptRoot $Folder
+        if (-not (Test-Path $NormalPath)) { $NormalPath = Join-Path $Config.PathUtils ".." | Resolve-Path }
+        
         $LockedPath = Join-Path $PSScriptRoot "$Folder.$($Config.VaultGUID)"
         
         if ($Mode -eq "Lock") {
@@ -66,14 +85,15 @@ function Set-VaultState {
 }
 
 function Mount-VirtualDrives {
-    subst $Config.DriveUtil /D | Out-Null
-    subst $Config.DriveSRE /D | Out-Null
+    # Tenta desmontar primeiro para evitar erros
+    try { subst $Config.DriveUtil /D } catch {}
+    try { subst $Config.DriveSRE /D } catch {}
     
     if (Test-Path $Config.PathUtils) {
-        subst $Config.DriveUtil $Config.PathUtils | Out-Null
+        subst $Config.DriveUtil $Config.PathUtils
     }
     if (Test-Path $Config.PathSRE) {
-        subst $Config.DriveSRE $Config.PathSRE | Out-Null
+        subst $Config.DriveSRE $Config.PathSRE
     }
 }
 
@@ -112,11 +132,13 @@ function Show-Menu {
 
 # --- Main Execution ---
 
-# 1. Garante que as pastas estao desbloqueadas e drives montados
-Set-VaultState -Mode Unlock | Out-Null
+# 1. Garante montagem inicial
+Mount-VirtualDrives
 
 # 2. Configura PATH para Python se existir
-$env:PATH += ";$Config.DriveSRE\python_env"
+if (Test-Path "$Config.DriveSRE\python_env") {
+    $env:PATH += ";$Config.DriveSRE\python_env"
+}
 
 # 3. Menu Loop
 $Running = $true
@@ -134,6 +156,8 @@ while ($Running) {
                 else {
                     powershell -ExecutionPolicy Bypass -File "$($Config.DriveSRE)\sre_core_ps.ps1"
                 }
+            } else {
+                Write-Warning "Arquivo de core SRE nao encontrado em T:."
             }
             Pause
         }
@@ -169,5 +193,5 @@ while ($Running) {
 }
 
 # Final Cleanup
-subst $Config.DriveUtil /D | Out-Null
-subst $Config.DriveSRE /D | Out-Null
+try { subst $Config.DriveUtil /D } catch {}
+try { subst $Config.DriveSRE /D } catch {}
